@@ -1,25 +1,33 @@
-module.exports = async (req, res) => {
+// /api/qr/status.js
+function applyCORS(res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+}
+function ok(res, data) {
+  res.setHeader('Content-Type', 'application/json');
+  res.status(200).json({ success: true, data });
+}
+function bad(res, msg, code = 400) {
+  res.setHeader('Content-Type', 'application/json');
+  res.status(code).json({ success: false, message: msg });
+}
 
-  if (req.method !== 'GET')
-    return res.status(405).json({ success: false, message: 'Method not allowed' });
+export default async function handler(req, res) {
+  applyCORS(res);
+  if (req.method === 'OPTIONS') return res.status(204).end();
 
-  try {
-    const { reference, amount } = req.query || {};
-    if (!reference) {
-      return res.status(400).json({ success: false, message: 'reference required' });
-    }
+  // Boleh GET (query) & POST (body)
+  const isGet = req.method === 'GET';
+  const isPost = req.method === 'POST';
+  if (!isGet && !isPost) return bad(res, 'Method not allowed', 405);
 
-    // TODO: ganti dengan panggilan checker Orkut kamu.
-    // Untuk demo: random status supaya UI bisa berubah
-    const paid = Math.random() < 0.2; // 20% chance
-    const status = paid ? 'PAID' : 'PENDING';
+  const ref = isGet ? req.query.reference : req.body?.reference;
+  const amount = Number(isGet ? req.query.amount : req.body?.amount);
 
-    res.status(200).json({
-      success: true,
-      data: { reference, amount: Number(amount) || null, status }
-    });
-  } catch (e) {
-    res.status(500).json({ success: false, message: e.message || 'internal error' });
-  }
-};
+  if (!ref || !amount) return bad(res, 'reference & amount required');
+
+  // Simulasi status: kalau detik genap → PAID, ganjil → PENDING
+  const paid = (Math.floor(Date.now() / 1000) % 2) === 0;
+  return ok(res, { reference: ref, amount, status: paid ? 'PAID' : 'PENDING' });
+}
