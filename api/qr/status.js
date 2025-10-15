@@ -1,45 +1,25 @@
-// api/qr/status.js
-// Sederhana: stub OK. Nanti kalau endpoint Orkut sudah ada,
-// tinggal ganti fetch ke URL resmi mereka.
+module.exports = async (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
 
-export default async function handler(req, res) {
-  if (req.method !== 'POST') {
+  if (req.method !== 'GET')
     return res.status(405).json({ success: false, message: 'Method not allowed' });
-  }
 
   try {
-    const { reference } = req.body || {};
+    const { reference, amount } = req.query || {};
     if (!reference) {
-      return res.status(400).json({ success: false, message: 'reference wajib' });
+      return res.status(400).json({ success: false, message: 'reference required' });
     }
 
-    // === TEMP: selalu pending 1x, lalu paid kalau diklik refresh > 1 menit ===
-    // (Biar front end bisa demo; ganti dengan fetch ke Orkut saat ada endpoint)
-    const now = Date.now();
-    const ts = Number(reference.replace(/\D/g, '')) || now;
-    const paid = (now - ts) > 15000; // dianggap paid setelah 15 detik
+    // TODO: ganti dengan panggilan checker Orkut kamu.
+    // Untuk demo: random status supaya UI bisa berubah
+    const paid = Math.random() < 0.2; // 20% chance
+    const status = paid ? 'PAID' : 'PENDING';
 
-    return res.status(200).json({
+    res.status(200).json({
       success: true,
-      reference,
-      status: paid ? 'PAID' : 'PENDING'
+      data: { reference, amount: Number(amount) || null, status }
     });
-
-    // === Contoh integrasi Orkut (kalau endpoint sudah ada) ===
-    // const r = await fetch('https://orkut.your-api/check', {
-    //   method: 'POST',
-    //   headers: { 'Content-Type': 'application/json' },
-    //   body: JSON.stringify({
-    //     auth_username: process.env.AUTH_USERNAME,
-    //     auth_token: process.env.AUTH_TOKEN,
-    //     reference
-    //   })
-    // });
-    // const json = await r.json();
-    // return res.status(200).json(json);
-
   } catch (e) {
-    console.error(e);
     res.status(500).json({ success: false, message: e.message || 'internal error' });
   }
-}
+};
