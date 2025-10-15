@@ -1,4 +1,4 @@
-// ======================= app.js =======================
+// ======================= app.js (FINAL TERINTEGRASI ORKUT) =======================
 
 /* ========= Theme toggle ========= */
 const modeBtn = document.getElementById('modeToggle');
@@ -144,28 +144,52 @@ function closeModal(){ setPayBtnLoading(false); stopPolling(); _closeQRModal(); 
 closeModalBtn?.addEventListener('click', closeModal);
 qrModal?.addEventListener('click', e=>{ if(e.target===qrModal) closeModal(); });
 
-/* ====== ORKUT BACKEND INTEGRATION (ADD-ONLY) ====== */
-/** Jika backend beda origin, isi base URL di sini.
- *  Kalau BARU di-deploy bareng (Vercel monorepo), biarin string kosong.
- */
-const API_BASE = ''; // contoh jika beda: 'https://levpay-api.vercel.app'
+/* ====== INTEGRASI ENDPOINT ORKUT (serverless Vercel) ======
+   KALAU API di domain lain, isi: const API_BASE='https://domain-api-kamu';
+   Kalau satu project (monorepo), biarin '' supaya pakai relative path. */
+const API_BASE = '';
 
+/* Helper normalisasi respons Orkut (tahan variasi field) */
+function pickQrImage(res){
+  // bisa dari field langsung, atau data.image/png_base64
+  const d = res?.data || res;
+  const img = d?.qr_image || d?.image || d?.png_base64 || res?.qr_image || res?.image || res?.png_base64;
+  if(!img) return null;
+  // kalau sudah base64, bungkus data-uri
+  if (/^[A-Za-z0-9+/=]+$/.test(String(img).replace(/^data:image\/png;base64,/, ''))) {
+    return String(img).startsWith('data:') ? img : `data:image/png;base64,${img}`;
+  }
+  return String(img); // mungkin URL langsung
+}
+function normalizeStatus(s){
+  const v = String(s||'').toUpperCase();
+  if (['PAID','SUCCESS','SUCCEEDED','PAID_SUCCESS'].includes(v)) return 'PAID';
+  return 'PENDING';
+}
+
+/* Panggil endpoint Orkut serverless */
 async function createPayment({ amount, nama, note }){
   const r = await fetch(`${API_BASE}/api/qr/create`, {
     method:'POST',
     headers:{ 'Content-Type':'application/json' },
-    body: JSON.stringify({
-      amount: Number(amount),
-      meta: { nama, note }
-    })
+    body: JSON.stringify({ amount: Number(amount), meta: { nama, note } })
   });
-  if(!r.ok) throw new Error('Gagal membuat QR');
-  return r.json(); // {success, reference, amount, qr_image}
+  const j = await r.json().catch(()=> ({}));
+  if(!r.ok || j?.success === false) throw new Error(j?.message || 'Gagal membuat QR');
+  const data = j?.data || j;
+  const reference = data?.reference || j?.reference || ('REF'+Date.now());
+  const qr_image = pickQrImage(j);
+  const qr_string = data?.qr_string || j?.qr_string || '';
+  const amt = Number(data?.amount ?? j?.amount ?? amount);
+  return { success:true, reference, amount: amt, qr_image, qr_string };
 }
+
 async function getStatus(reference, amount){
   const r = await fetch(`${API_BASE}/api/qr/status?reference=${encodeURIComponent(reference)}&amount=${Number(amount)}`);
-  if(!r.ok) throw new Error('Gagal cek status');
-  return r.json(); // {success, data:{status}}
+  const j = await r.json().catch(()=> ({}));
+  if(!r.ok || j?.success === false) throw new Error(j?.message || 'Gagal cek status');
+  const raw = (j?.data?.status ?? j?.status ?? 'PENDING');
+  return { success:true, data:{ status: normalizeStatus(raw) } };
 }
 
 /* ====== Builder + Polling ====== */
@@ -219,7 +243,7 @@ function startPolling(reference, amount){
   }, 3000);
 }
 
-/* ==== GANTI runBuilder: pakai Orkut backend, TANPA menghapus UI ==== */
+/* ==== runBuilder: pakai Orkut backend */
 async function runBuilder(nama, nominal, note){
   if (!builder || !qrWrap) return;
   builder.hidden = false; qrWrap.hidden = true;
@@ -230,13 +254,13 @@ async function runBuilder(nama, nominal, note){
 
   try{
     const resp = await createPayment({ amount: nominal, nama, note });
-    if(!resp?.success) throw new Error(resp?.message || 'Create gagal');
-
     setTimeout(()=>{ p3.style.width='100%'; }, 200);
 
     const { reference, amount, qr_image } = resp;
-    // tampilkan QR dari backend
-    qrContainer.innerHTML = `<img src="${qr_image}" alt="QRIS" width="320" height="320" decoding="async" loading="eager">`;
+    const img = qr_image || '';
+    if (!img) throw new Error('QR kosong dari server');
+
+    qrContainer.innerHTML = `<img src="${img}" alt="QRIS" width="320" height="320" decoding="async" loading="eager">`;
     qrMeta.textContent = `Atas nama: ${nama} · Ref: ${reference} · Nominal: Rp ${Number(amount).toLocaleString('id-ID')}`;
     window.__levpayTx = { reference, amount };
 
@@ -245,7 +269,7 @@ async function runBuilder(nama, nominal, note){
     startPolling(reference, amount);
   }catch(e){
     builderMsg.textContent='Gagal membuat QR. Coba lagi.';
-    toast('Gagal membuat QR');
+    toast(e?.message || 'Gagal membuat QR');
     setTimeout(()=>closeModal(), 1100);
   }
 }
@@ -295,7 +319,7 @@ document.getElementById('refresh')?.addEventListener('click', async ()=>{
   }catch(_){ toast('Gagal cek status'); }
 });
 
-/* ========= Firebase init (DIPERTAHANKAN) ========= */
+/* ========= Firebase (dipertahankan) ========= */
 const firebaseConfig = {
   apiKey: "AIzaSyA8-PyhrZkgd7Q434YLug2VezO8MsKCjOc",
   authDomain: "levpay-63157.firebaseapp.com",
@@ -316,7 +340,7 @@ try{
   console.error('Firebase init error:', e);
 }
 
-/* ========= Wall (Firebase) (DIPERTAHANKAN) ========= */
+/* ========= Wall (dipertahankan) ========= */
 const wallInput = document.getElementById('wallInput');
 const wallSend  = document.getElementById('wallSend');
 const wallErr   = document.getElementById('wallErr');
@@ -374,15 +398,13 @@ wallSend?.addEventListener('click', async ()=>{
   }
 });
 
-/* ===== FAB DIALS FINAL — toggle tap-to-show stays open until tapped again (DIPERTAHANKAN) ===== */
+/* ===== FAB dials (dipertahankan) ===== */
 (function(){
   const dials = Array.from(document.querySelectorAll('.fab.dial'));
-
   function toggleDial(dial){
     const btn  = dial.querySelector('.fab-btn.main');
     const menu = dial.querySelector('.fab-menu');
     const isOpen = dial.classList.contains('open');
-
     if(isOpen){
       dial.classList.remove('open');
       btn.setAttribute('aria-expanded','false');
@@ -394,7 +416,6 @@ wallSend?.addEventListener('click', async ()=>{
       menu.removeAttribute('hidden');
     }
   }
-
   dials.forEach(dial=>{
     const btn = dial.querySelector('.fab-btn.main');
     const menu = dial.querySelector('.fab-menu');
@@ -403,7 +424,6 @@ wallSend?.addEventListener('click', async ()=>{
       e.stopPropagation();
       toggleDial(dial);
     });
-
     dial.querySelectorAll('.fab-menu a').forEach(a=>{
       a.addEventListener('click', e=>{
         e.preventDefault();
@@ -413,7 +433,6 @@ wallSend?.addEventListener('click', async ()=>{
       });
     });
   });
-
   document.addEventListener('click', (e)=>{
     if(!dials.some(d=>d.contains(e.target))){
       dials.forEach(d=>{
@@ -424,7 +443,7 @@ wallSend?.addEventListener('click', async ()=>{
   });
 })();
 
-/* ==== Modal Pesan Publik (DIPERTAHANKAN) ==== */
+/* ==== Modal Pesan Publik (dipertahankan) ==== */
 const wallModal = document.getElementById('wallModal');
 const fabWall   = document.getElementById('fabWall');
 const closeWall = document.getElementById('closeWall');
