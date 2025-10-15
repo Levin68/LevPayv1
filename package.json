@@ -1,12 +1,10 @@
 {
   "name": "levpay-qris",
-  "version": "1.0.0",
   "private": true,
   "type": "module",
+  "engines": { "node": "20.x" },
   "dependencies": {
-    "autoft-qris": "^0.0.9"
-  },
-  "scripts": {
-    "dev": "vercel dev"
+    "autoft-qris": "^0.0.9",
+    "qrcode": "^1.5.3"
   }
 }
