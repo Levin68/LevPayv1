@@ -1,4 +1,6 @@
-import { PaymentChecker } from 'autoft-qris';
+// api/qr/status.js
+// Sederhana: stub OK. Nanti kalau endpoint Orkut sudah ada,
+// tinggal ganti fetch ke URL resmi mereka.
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -6,30 +8,38 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { reference, amount } = req.body || {};
-    const amt = Number(amount);
-
-    if (!reference || !amt) {
-      return res.status(400).json({ success: false, message: 'reference & amount wajib' });
+    const { reference } = req.body || {};
+    if (!reference) {
+      return res.status(400).json({ success: false, message: 'reference wajib' });
     }
 
-    const AUTH_USERNAME = process.env.AUTH_USERNAME;
-    const AUTH_TOKEN    = process.env.AUTH_TOKEN;
+    // === TEMP: selalu pending 1x, lalu paid kalau diklik refresh > 1 menit ===
+    // (Biar front end bisa demo; ganti dengan fetch ke Orkut saat ada endpoint)
+    const now = Date.now();
+    const ts = Number(reference.replace(/\D/g, '')) || now;
+    const paid = (now - ts) > 15000; // dianggap paid setelah 15 detik
 
-    if (!AUTH_USERNAME || !AUTH_TOKEN) {
-      return res.status(500).json({ success: false, message: 'Missing environment configuration' });
-    }
-
-    const checker = new PaymentChecker({
-      auth_username: AUTH_USERNAME,
-      auth_token: AUTH_TOKEN
+    return res.status(200).json({
+      success: true,
+      reference,
+      status: paid ? 'PAID' : 'PENDING'
     });
 
-    const result = await checker.checkPaymentStatus(reference, amt);
-    // result.data.status biasanya: 'PENDING' | 'PAID' | 'FAILED'
-    return res.status(200).json(result);
-  } catch (err) {
-    console.error('Status Error:', err);
-    res.status(500).json({ success: false, message: err.message || 'internal error' });
+    // === Contoh integrasi Orkut (kalau endpoint sudah ada) ===
+    // const r = await fetch('https://orkut.your-api/check', {
+    //   method: 'POST',
+    //   headers: { 'Content-Type': 'application/json' },
+    //   body: JSON.stringify({
+    //     auth_username: process.env.AUTH_USERNAME,
+    //     auth_token: process.env.AUTH_TOKEN,
+    //     reference
+    //   })
+    // });
+    // const json = await r.json();
+    // return res.status(200).json(json);
+
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ success: false, message: e.message || 'internal error' });
   }
 }
