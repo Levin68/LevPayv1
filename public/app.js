@@ -228,22 +228,21 @@ function startPolling(reference, amount){
   setPendingUI();
   let elapsed=0, timeout=5*60;
   __poll = setInterval(async ()=>{
-    try{
-      const res = await getStatus(reference, amount);
-      const status = res?.data?.status || 'PENDING';
-      if(status==='PAID'){
-        stopPolling();
-        setPaidUI();
-        toast('Pembayaran terverifikasi ✅');
-        setTimeout(()=>closeModal(), 1100);
-      }
-    }catch(_){}
-    elapsed += 3;
-    if (elapsed>=timeout) stopPolling();
-  }, 3000);
-}
+  try{
+    const res = await getStatus(reference, amount);
+    const d = res?.data && typeof res.data === 'object' ? res.data : res;
+    const status = d?.status || 'PENDING';
+    if(status === 'PAID'){
+      stopPolling();
+      setPaidUI();
+      toast('Pembayaran terverifikasi ✅');
+      setTimeout(()=>closeModal(), 1100);
+    }
+  }catch(_){}
+  elapsed += 3;
+  if (elapsed>=timeout) stopPolling();
+}, 3000);
 
-/* ==== runBuilder: pakai Orkut backend */
 async function runBuilder(nama, nominal, note){
   if (!builder || !qrWrap) return;
   builder.hidden = false; qrWrap.hidden = true;
@@ -254,22 +253,34 @@ async function runBuilder(nama, nominal, note){
 
   try{
     const resp = await createPayment({ amount: nominal, nama, note });
+
+    // normalisasi payload: bisa resp.data atau resp langsung
+    const data = resp?.data && typeof resp.data === 'object' ? resp.data : resp;
+    if(!data?.reference) throw new Error(data?.message || 'Create gagal');
+
     setTimeout(()=>{ p3.style.width='100%'; }, 200);
 
-    const { reference, amount, qr_image } = resp;
-    const img = qr_image || '';
-    if (!img) throw new Error('QR kosong dari server');
+    const { reference, amount } = data;
 
-    qrContainer.innerHTML = `<img src="${img}" alt="QRIS" width="320" height="320" decoding="async" loading="eager">`;
+    // ambil src gambar dari salah satu field yang tersedia
+    const imgSrc =
+      data.qr_image || data.qr_image_url ||
+      resp.qr_image || resp.qr_image_url;
+
+    if(!imgSrc) throw new Error('QR image tidak tersedia');
+
+    qrContainer.innerHTML = `<img src="${imgSrc}" alt="QRIS" width="320" height="320" decoding="async" loading="eager">`;
     qrMeta.textContent = `Atas nama: ${nama} · Ref: ${reference} · Nominal: Rp ${Number(amount).toLocaleString('id-ID')}`;
-    window.__levpayTx = { reference, amount };
 
+    window.__levpayTx = { reference, amount };
     builder.hidden = true; qrWrap.hidden = false;
+
     startExpiry(5*60);
     startPolling(reference, amount);
   }catch(e){
+    console.error(e);
     builderMsg.textContent='Gagal membuat QR. Coba lagi.';
-    toast(e?.message || 'Gagal membuat QR');
+    toast('Gagal membuat QR');
     setTimeout(()=>closeModal(), 1100);
   }
 }
@@ -307,8 +318,9 @@ document.getElementById('refresh')?.addEventListener('click', async ()=>{
   if (!tx?.reference) return toast('Belum ada transaksi');
   try{
     const res = await getStatus(tx.reference, tx.amount);
-    const st = res?.data?.status || 'PENDING';
-    if(st==='PAID'){
+    const d = res?.data && typeof res.data === 'object' ? res.data : res;
+    const st = d?.status || 'PENDING';
+    if(st === 'PAID'){
       stopPolling();
       setPaidUI();
       toast('Pembayaran terverifikasi ✅');
