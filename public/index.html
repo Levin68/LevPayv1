@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>LevPay — QRIS Payment</title>
+
+  <!-- Font & Icon -->
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet"
+        href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"
+        onerror="document.documentElement.classList.add('no-fa')"/>
+
+  <!-- Firebase compat (App + Firestore) — DIPERTAHANKAN -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js"></script>
+
+  <link rel="stylesheet" href="./style.css"/>
+  <meta name="theme-color" content="#0a0a0a"/>
+  <meta name="description" content="Terima pembayaran QRIS instan — buat QR dinamis, cek status real-time, resi otomatis."/>
+</head>
+<body>
+  <!-- Header -->
+  <header>
+    <nav class="container">
+      <div class="logo">LevPay</div>
+      <button id="modeToggle" class="mode-toggle" aria-label="Ganti tema">
+        <i class="fa-solid fa-moon"></i>
+      </button>
+    </nav>
+  </header>
+
+  <!-- Hero -->
+  <section class="hero">
+    <div class="container">
+      <h1 data-chars="11">LevPay QRIS</h1>
+      <p>Payment Gateway Cepat &amp; Aman — Integrasi Backend Otomatis</p>
+      <div class="support-notif centered-notif">
+        <span class="support-badge"><i class="fa-solid fa-lock"></i></span>
+        <span>Aman 100% — QRIS Resmi Bank Indonesia</span>
+      </div>
+    </div>
+  </section>
+
+  <main class="container">
+    <!-- Payment form -->
+    <section class="payment-section">
+      <h2><i class="fa-solid fa-credit-card"></i> Isi Detail Pembayaran</h2>
+
+      <form id="paymentForm" novalidate>
+        <div class="form-group">
+          <label>Nama Pembeli</label>
+          <div class="field">
+            <i class="fa-solid fa-user"></i>
+            <input id="nama" type="text" placeholder="Masukkan nama lengkap" autocomplete="name" required>
+          </div>
+        </div>
+
+        <!-- Splash (dipertahankan) -->
+        <div id="splash">
+          <h1>LevPay</h1>
+        </div>
+
+        <div class="form-group">
+          <label>Pesan untuk Admin</label>
+          <div class="field textarea">
+            <i class="fa-solid fa-message"></i>
+            <textarea id="pesan" placeholder="Opsional: catatan order"></textarea>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>Nominal</label>
+          <div class="field">
+            <i class="fa-solid fa-rupiah-sign"></i>
+            <input id="nominal" type="text" inputmode="numeric" placeholder="Masukkan nominal (Rp)" required>
+          </div>
+          <small id="errNominal" class="err" aria-live="polite"></small>
+
+          <div class="preset-nominal">
+            <button type="button" class="preset-btn" data-value="10000">Rp10.000</button>
+            <button type="button" class="preset-btn" data-value="20000">Rp20.000</button>
+            <button type="button" class="preset-btn" data-value="50000">Rp50.000</button>
+          </div>
+        </div>
+
+        <button type="submit" id="payBtn" class="submit-btn">
+          <span class="lbl"><i class="fa-solid fa-qrcode"></i> Buat QRIS</span>
+          <span class="spin" hidden></span>
+        </button>
+      </form>
+    </section>
+
+    <div class="support-notif">
+      <span class="support-badge"><i class="fa-solid fa-info"></i></span>
+      <span>Support Bank: BCA, BNI, Mandiri, BRI, dll — konfirmasi otomatis via backend.</span>
+    </div>
+
+    <!-- Cards -->
+    <div class="payment-methods">
+      <div class="method-card"><i class="fa-solid fa-wallet"></i><h3>Dana</h3><p>Transfer cepat & praktis.</p></div>
+      <div class="method-card"><i class="fa-solid fa-mobile-screen"></i><h3>OVO</h3><p>Scan & bayar instan.</p></div>
+      <div class="method-card gopay">
+        <div class="circle" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M3 7a3 3 0 0 1 3-3h11a2 2 0 0 1 2 2v2h-5a3 3 0 1 0 0 6h5v2a2 2 0 0 1-2 2H6a3 3 0 0 1-3-3V7zm13 4h6v2h-6a1 1 0 1 1 0-2z"/></svg>
+        </div>
+        <h3>GoPay</h3><p>Pembayaran instan.</p>
+      </div>
+      <div class="method-card"><i class="fa-solid fa-building-columns"></i><h3>Bank</h3><p>ATM/Mobile Banking.</p></div>
+    </div>
+
+    <div class="promo">Bayar Sekarang — Diskon 10% Transaksi Pertama!</div>
+
+    <div class="features">
+      <div class="feature-card"><i class="fa-solid fa-shield-halved"></i><h3>Transaksi Aman</h3><p>Enkripsi & kepatuhan QRIS.</p></div>
+      <div class="feature-card"><i class="fa-solid fa-bolt"></i><h3>Proses Cepat</h3><p>Konfirmasi &lt; 30 detik.</p></div>
+      <div class="feature-card"><i class="fa-solid fa-plug"></i><h3>Integrasi Mudah</h3><p>Webhook/API siap pakai.</p></div>
+    </div>
+
+    <!-- Marquee lirik -->
+    <div class="marquee">
+      <div class="marquee-track" id="lirikTrack"></div>
+    </div>
+  </main>
+
+  <div class="lirik-box" id="lirikBox"></div>
+
+  <!-- Modal QR -->
+  <div id="qrModal" class="modal" aria-hidden="true">
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="qrTitle">
+      <div class="modal-head">
+        <h3 id="qrTitle"><i class="fa-solid fa-qrcode"></i> Scan QRIS untuk Bayar</h3>
+        <button class="close-btn" id="closeModal" aria-label="Tutup"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+
+      <div id="builder" class="builder">
+        <strong>Menyiapkan pembayaran…</strong>
+        <div class="steps">
+          <div class="step"><span id="p1"></span></div>
+          <div class="step"><span id="p2"></span></div>
+          <div class="step"><span id="p3"></span></div>
+        </div>
+        <div class="msg"><span class="spin"></span><span id="builderMsg">Mempersiapkan order</span></div>
+      </div>
+
+      <div id="qrWrap" class="qr-wrap" hidden>
+        <div class="qr-box"><div id="qrContainer">Generating QRIS…</div></div>
+        <div class="qr-meta" id="qrMeta">—</div>
+        <div class="pill pending">Status: Pending — <span id="expiry">05:00</span></div>
+        <div class="qr-actions">
+          <button class="mini" id="copyAmount"><i class="fa-solid fa-copy"></i> Salin Nominal</button>
+          <button class="mini" id="copyNote"><i class="fa-solid fa-copy"></i> Salin Keterangan</button>
+          <button class="mini" id="refresh"><i class="fa-solid fa-rotate-right"></i> Cek Status</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== FAB DIALS (kanan-bawah) — DIPERTAHANKAN ===== -->
+  <div class="fab-dock">
+    <!-- Dial: Support -->
+    <div class="fab dial" id="fabSupport">
+      <button class="fab-btn main" aria-expanded="false" aria-controls="menuSupport" aria-label="Buka menu support">
+        <i class="fa-solid fa-headset"></i>
+      </button>
+      <ul class="fab-menu" id="menuSupport" hidden>
+        <li>
+          <a class="fab-item" href="https://wa.me/6281210701366" target="_blank" rel="noopener" title="Chat Admin">
+            <i class="fa-brands fa-whatsapp"></i>
+          </a>
+        </li>
+        <li>
+          <a class="fab-item" href="https://whatsapp.com/channel/0029Vb6Mmcc5Ejy5eGmCQD2O" target="_blank" rel="noopener" title="Ke Channel">
+            <i class="fa-solid fa-bullhorn"></i>
+          </a>
+        </li>
+      </ul>
+    </div>
+
+    <!-- Dial: Social -->
+    <div class="fab dial" id="fabSocial">
+      <button class="fab-btn main" aria-expanded="false" aria-controls="menuSocial" aria-label="Buka menu sosial">
+        <i class="fa-solid fa-share-nodes"></i>
+      </button>
+      <ul class="fab-menu" id="menuSocial" hidden>
+        <li>
+          <a class="fab-item" href="https://www.tiktok.com/@alv1nvinn_?_t=ZS-90ZRJfcm7b0&_r=1" target="_blank" rel="noopener" title="TikTok">
+            <i class="fab fa-tiktok"></i>
+          </a>
+        </li>
+        <li>
+          <a class="fab-item" href="https://www.instagram.com/alvv68_?igsh=MWV2NnpqZG42MjNuNw==" target="_blank" rel="noopener" title="Instagram">
+            <i class="fab fa-instagram"></i>
+          </a>
+        </li>
+        <li>
+          <a class="fab-item" href="https://github.com/Levin68" target="_blank" rel="noopener" title="GitHub">
+            <i class="fab fa-github"></i>
+          </a>
+        </li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- FAB: Pesan Publik (dipertahankan) -->
+  <button type="button" class="fab-gold main" id="fabWall" aria-label="Pesan Publik" aria-controls="wallModal">
+    <i class="fa-solid fa-comments"></i>
+  </button>
+
+  <!-- Modal Pesan Publik (dipertahankan) -->
+  <div id="wallModal" class="modal" aria-hidden="true">
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="wallTitle">
+      <div class="modal-head">
+        <h3 id="wallTitle"><i class="fa-solid fa-comments"></i> Pesan Publik</h3>
+        <button class="close-btn" id="closeWall" aria-label="Tutup">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <ul id="wallList" class="wall-list"></ul>
+
+      <div class="field textarea" style="margin-top:12px">
+        <i class="fa-solid fa-message"></i>
+        <textarea id="wallInput" maxlength="200" placeholder="Tulis pesan singkat (maks 200 karakter)"></textarea>
+      </div>
+      <small id="wallErr" class="err"></small>
+      <button id="wallSend" class="submit-btn" style="margin-top:10px;width:100%">Kirim</button>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast" role="status" aria-live="polite"></div>
+
+  <!-- Footer -->
+  <footer>
+    <div class="container footer-inner">
+      <div class="footer-actions">
+        <a class="cta channel" href="https://whatsapp.com/channel/0029Vb6Mmcc5Ejy5eGmCQD2O" target="_blank" rel="noopener">
+          <i class="fa-solid fa-bullhorn"></i>Channel
+        </a>
+        <a class="cta admin" href="https://wa.me/6281210701366" target="_blank" rel="noopener">
+          <i class="fa-solid fa-headset"></i>Admin
+        </a>
+      </div>
+      <div class="social">
+        <a href="https://www.tiktok.com/@alv1nvinn_?_t=ZS-90ZICqgU4v4&_r=1" aria-label="TikTok" target="_blank" rel="noopener"><i class="fab fa-tiktok"></i></a>
+        <a href="https://www.instagram.com/alvv68_?igsh=MWV2NnpqZG42MjNuNw==" aria-label="Instagram" target="_blank" rel="noopener"><i class="fab fa-instagram"></i></a>
+      </div>
+      <div class="copyright">© <span id="year"></span> LevPay. All rights reserved.</div>
+    </div>
+  </footer>
+
+  <script src="./app.js" defer></script>
+</body>
+</html>
