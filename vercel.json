@@ -9,5 +9,6 @@
     { "source": "/", "destination": "/public/index.html" },
     { "source": "/(.*)", "destination": "/public/$1" }
   ],
-  "cleanUrls": true
+  "cleanUrls": true,
+  "installCommand": "npm ci --no-optional"
 }
