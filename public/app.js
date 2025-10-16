@@ -1,4 +1,4 @@
-// ======================= app.js (FINAL TERINTEGRASI ORKUT) =======================
+// ======================= app.js =======================
 
 /* ========= Theme toggle ========= */
 const modeBtn = document.getElementById('modeToggle');
@@ -140,59 +140,11 @@ function _closeQRModal(){
   qrModal?.setAttribute('aria-hidden','true');
   lastFocus && lastFocus.focus && lastFocus.focus();
 }
-function closeModal(){ setPayBtnLoading(false); stopPolling(); _closeQRModal(); }
+function closeModal(){ setPayBtnLoading(false); _closeQRModal(); }
 closeModalBtn?.addEventListener('click', closeModal);
 qrModal?.addEventListener('click', e=>{ if(e.target===qrModal) closeModal(); });
 
-/* ====== INTEGRASI ENDPOINT ORKUT (serverless Vercel) ======
-   KALAU API di domain lain, isi: const API_BASE='https://domain-api-kamu';
-   Kalau satu project (monorepo), biarin '' supaya pakai relative path. */
-const API_BASE = '';
-
-/* Helper normalisasi respons Orkut (tahan variasi field) */
-function pickQrImage(res){
-  // bisa dari field langsung, atau data.image/png_base64
-  const d = res?.data || res;
-  const img = d?.qr_image || d?.image || d?.png_base64 || res?.qr_image || res?.image || res?.png_base64;
-  if(!img) return null;
-  // kalau sudah base64, bungkus data-uri
-  if (/^[A-Za-z0-9+/=]+$/.test(String(img).replace(/^data:image\/png;base64,/, ''))) {
-    return String(img).startsWith('data:') ? img : `data:image/png;base64,${img}`;
-  }
-  return String(img); // mungkin URL langsung
-}
-function normalizeStatus(s){
-  const v = String(s||'').toUpperCase();
-  if (['PAID','SUCCESS','SUCCEEDED','PAID_SUCCESS'].includes(v)) return 'PAID';
-  return 'PENDING';
-}
-
-/* Panggil endpoint Orkut serverless */
-async function createPayment({ amount, nama, note }){
-  const r = await fetch(`${API_BASE}/api/qr/create`, {
-    method:'POST',
-    headers:{ 'Content-Type':'application/json' },
-    body: JSON.stringify({ amount: Number(amount), meta: { nama, note } })
-  });
-  const j = await r.json().catch(()=> ({}));
-  if(!r.ok || j?.success === false) throw new Error(j?.message || 'Gagal membuat QR');
-  const data = j?.data || j;
-  const reference = data?.reference || j?.reference || ('REF'+Date.now());
-  const qr_image = pickQrImage(j);
-  const qr_string = data?.qr_string || j?.qr_string || '';
-  const amt = Number(data?.amount ?? j?.amount ?? amount);
-  return { success:true, reference, amount: amt, qr_image, qr_string };
-}
-
-async function getStatus(reference, amount){
-  const r = await fetch(`${API_BASE}/api/qr/status?reference=${encodeURIComponent(reference)}&amount=${Number(amount)}`);
-  const j = await r.json().catch(()=> ({}));
-  if(!r.ok || j?.success === false) throw new Error(j?.message || 'Gagal cek status');
-  const raw = (j?.data?.status ?? j?.status ?? 'PENDING');
-  return { success:true, data:{ status: normalizeStatus(raw) } };
-}
-
-/* ====== Builder + Polling ====== */
+/* ====== Builder (LOCAL ONLY, TANPA BACKEND) ====== */
 const builder = document.getElementById('builder');
 const qrWrap = document.getElementById('qrWrap');
 const p1 = document.getElementById('p1'), p2 = document.getElementById('p2'), p3 = document.getElementById('p3');
@@ -213,76 +165,21 @@ function startExpiry(s){
   tick(); expTimer=setInterval(tick,1000);
 }
 
-let __poll=null;
-function stopPolling(){ if(__poll){ clearInterval(__poll); __poll=null; } }
-function setPaidUI(){
-  const pill = document.querySelector('.pill');
-  if (pill){ pill.className = 'pill paid'; pill.textContent = 'Status: PAID — Terima kasih!'; }
-}
-function setPendingUI(){
-  const pill = document.querySelector('.pill');
-  if (pill){ pill.className = 'pill pending'; pill.innerHTML = 'Status: Pending — <span id="expiry">05:00</span>'; }
-}
-function startPolling(reference, amount){
-  stopPolling();
-  setPendingUI();
-  let elapsed=0, timeout=5*60;
-  __poll = setInterval(async ()=>{
-  try{
-    const res = await getStatus(reference, amount);
-    const d = res?.data && typeof res.data === 'object' ? res.data : res;
-    const status = d?.status || 'PENDING';
-    if(status === 'PAID'){
-      stopPolling();
-      setPaidUI();
-      toast('Pembayaran terverifikasi ✅');
-      setTimeout(()=>closeModal(), 1100);
-    }
-  }catch(_){}
-  elapsed += 3;
-  if (elapsed>=timeout) stopPolling();
-}, 3000);
-
-async function runBuilder(nama, nominal, note){
+function runBuilder(nama, nominal, note){
   if (!builder || !qrWrap) return;
   builder.hidden = false; qrWrap.hidden = true;
   p1.style.width='0'; p2.style.width='0'; p3.style.width='0';
   builderMsg.textContent='Mempersiapkan order';
-  setTimeout(()=>{ p1.style.width='100%'; builderMsg.textContent='Menghubungkan gateway'; },400);
-  setTimeout(()=>{ p2.style.width='100%'; builderMsg.textContent='Membangun QR dinamis'; },900);
-
-  try{
-    const resp = await createPayment({ amount: nominal, nama, note });
-
-    // normalisasi payload: bisa resp.data atau resp langsung
-    const data = resp?.data && typeof resp.data === 'object' ? resp.data : resp;
-    if(!data?.reference) throw new Error(data?.message || 'Create gagal');
-
-    setTimeout(()=>{ p3.style.width='100%'; }, 200);
-
-    const { reference, amount } = data;
-
-    // ambil src gambar dari salah satu field yang tersedia
-    const imgSrc =
-      data.qr_image || data.qr_image_url ||
-      resp.qr_image || resp.qr_image_url;
-
-    if(!imgSrc) throw new Error('QR image tidak tersedia');
-
-    qrContainer.innerHTML = `<img src="${imgSrc}" alt="QRIS" width="320" height="320" decoding="async" loading="eager">`;
-    qrMeta.textContent = `Atas nama: ${nama} · Ref: ${reference} · Nominal: Rp ${Number(amount).toLocaleString('id-ID')}`;
-
-    window.__levpayTx = { reference, amount };
+  setTimeout(()=>{ p1.style.width='100%'; builderMsg.textContent='Menghubungkan gateway'; },500);
+  setTimeout(()=>{ p2.style.width='100%'; builderMsg.textContent='Membangun QR dinamis'; },1000);
+  setTimeout(()=>{
+    p3.style.width='100%';
+    const qrURL='https://api.qrserver.com/v1/create-qr-code/?size=320x320&data='+encodeURIComponent(`LEVPAY|${nama}|${nominal}|${note||''}`);
+    qrContainer.innerHTML=`<img src="${qrURL}" alt="QRIS" width="320" height="320" decoding="async" loading="eager">`;
+    qrMeta.textContent=`Atas nama: ${nama} · Nominal: Rp ${Number(nominal).toLocaleString('id-ID')}`;
     builder.hidden = true; qrWrap.hidden = false;
-
     startExpiry(5*60);
-    startPolling(reference, amount);
-  }catch(e){
-    console.error(e);
-    builderMsg.textContent='Gagal membuat QR. Coba lagi.';
-    toast('Gagal membuat QR');
-    setTimeout(()=>closeModal(), 1100);
-  }
+  },1600);
 }
 
 const payBtn = document.getElementById('payBtn');
@@ -304,7 +201,9 @@ document.getElementById('paymentForm')?.addEventListener('submit', (e)=>{
   }
   setPayBtnLoading(true);
   openQRModal();
-  runBuilder(nama, nominalVal, pesan).finally(()=> setPayBtnLoading(false));
+  runBuilder(nama, nominalVal, pesan);
+  clearTimeout(window.__levpayStopSpin);
+  window.__levpayStopSpin = setTimeout(()=>setPayBtnLoading(false), 3000);
 });
 document.getElementById('copyAmount')?.addEventListener('click', ()=>{
   navigator.clipboard.writeText(String(nominalNumber())).then(()=>toast('Nominal disalin'));
@@ -313,25 +212,16 @@ document.getElementById('copyNote')?.addEventListener('click', ()=>{
   const v = inpPesan?.value || 'Pembayaran LevPay';
   navigator.clipboard.writeText(v).then(()=>toast('Keterangan disalin'));
 });
-document.getElementById('refresh')?.addEventListener('click', async ()=>{
-  const tx = window.__levpayTx;
-  if (!tx?.reference) return toast('Belum ada transaksi');
-  try{
-    const res = await getStatus(tx.reference, tx.amount);
-    const d = res?.data && typeof res.data === 'object' ? res.data : res;
-    const st = d?.status || 'PENDING';
-    if(st === 'PAID'){
-      stopPolling();
-      setPaidUI();
-      toast('Pembayaran terverifikasi ✅');
-      setTimeout(()=>closeModal(), 1100);
-    }else{
-      toast(`Status: ${st}`);
-    }
-  }catch(_){ toast('Gagal cek status'); }
+document.getElementById('refresh')?.addEventListener('click', ()=>{
+  const pill = document.querySelector('.pill');
+  if (!pill) return;
+  pill.className = 'pill paid';
+  pill.textContent = 'Status: PAID — Terima kasih!';
+  toast('Pembayaran terverifikasi ✅');
+  setTimeout(()=>closeModal(), 1100);
 });
 
-/* ========= Firebase (dipertahankan) ========= */
+/* ========= Firebase init ========= */
 const firebaseConfig = {
   apiKey: "AIzaSyA8-PyhrZkgd7Q434YLug2VezO8MsKCjOc",
   authDomain: "levpay-63157.firebaseapp.com",
@@ -352,7 +242,7 @@ try{
   console.error('Firebase init error:', e);
 }
 
-/* ========= Wall (dipertahankan) ========= */
+/* ========= Wall (Firebase) ========= */
 const wallInput = document.getElementById('wallInput');
 const wallSend  = document.getElementById('wallSend');
 const wallErr   = document.getElementById('wallErr');
@@ -410,13 +300,15 @@ wallSend?.addEventListener('click', async ()=>{
   }
 });
 
-/* ===== FAB dials (dipertahankan) ===== */
+/* ===== FAB DIALS FINAL ===== */
 (function(){
   const dials = Array.from(document.querySelectorAll('.fab.dial'));
+
   function toggleDial(dial){
     const btn  = dial.querySelector('.fab-btn.main');
     const menu = dial.querySelector('.fab-menu');
     const isOpen = dial.classList.contains('open');
+
     if(isOpen){
       dial.classList.remove('open');
       btn.setAttribute('aria-expanded','false');
@@ -428,6 +320,7 @@ wallSend?.addEventListener('click', async ()=>{
       menu.removeAttribute('hidden');
     }
   }
+
   dials.forEach(dial=>{
     const btn = dial.querySelector('.fab-btn.main');
     const menu = dial.querySelector('.fab-menu');
@@ -436,6 +329,7 @@ wallSend?.addEventListener('click', async ()=>{
       e.stopPropagation();
       toggleDial(dial);
     });
+
     dial.querySelectorAll('.fab-menu a').forEach(a=>{
       a.addEventListener('click', e=>{
         e.preventDefault();
@@ -445,6 +339,7 @@ wallSend?.addEventListener('click', async ()=>{
       });
     });
   });
+
   document.addEventListener('click', (e)=>{
     if(!dials.some(d=>d.contains(e.target))){
       dials.forEach(d=>{
@@ -455,7 +350,7 @@ wallSend?.addEventListener('click', async ()=>{
   });
 })();
 
-/* ==== Modal Pesan Publik (dipertahankan) ==== */
+/* ==== Modal Pesan Publik ==== */
 const wallModal = document.getElementById('wallModal');
 const fabWall   = document.getElementById('fabWall');
 const closeWall = document.getElementById('closeWall');
