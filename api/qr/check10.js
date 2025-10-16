@@ -24,12 +24,12 @@ export default async function handler(req, res) {
   const amount = Number(isGet ? req.query.amount : req.body?.amount);
   if (!ref || !amount) return bad(res, "reference & amount required");
 
-  const paid = Math.floor(Date.now() / 1000) % 2 === 0;   // simulator
+  const paid = (Math.floor(Date.now() / 1000) % 2) === 0;
 
   return ok(res, {
     reference: ref,
     amount,
     status: paid ? "PAID" : "PENDING",
-    checked_at: new Date().toISOString(),
+    checked_at: new Date().toISOString()
   });
 }
