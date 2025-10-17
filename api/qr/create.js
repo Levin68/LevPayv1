@@ -1,156 +1,113 @@
-// /api/qr/create.js — FIXED (biar bisa TF)
+// api/qr/create.js — FINAL (ESM)
 
-// ======== ENV ========
+export const config = { runtime: "edge" };
+
+// ===== ENV =====
 const { AUTH_USERNAME, AUTH_TOKEN, BASE_QR_STRING, STORE_NAME } = process.env;
 
-// ======== CRC16-CCITT (0x1021, init 0xFFFF) ========
-function crc16ccitt(hexStr) {
+// ===== CRC16-CCITT =====
+function crc16ccitt(hex) {
   let crc = 0xffff;
-  for (let i = 0; i < hexStr.length; i += 2) {
-    const byte = parseInt(hexStr.substr(i, 2), 16);
-    crc ^= (byte << 8);
-    for (let j = 0; j < 8; j++) {
-      crc = (crc & 0x8000) ? ((crc << 1) ^ 0x1021) : (crc << 1);
-      crc &= 0xffff;
-    }
+  for (let i = 0; i < hex.length; i += 2) {
+    const b = parseInt(hex.substr(i, 2), 16);
+    crc ^= (b << 8);
+    for (let j = 0; j < 8; j++) crc = (crc & 0x8000) ? ((crc << 1) ^ 0x1021) : (crc << 1), crc &= 0xffff;
   }
-  return crc.toString(16).toUpperCase().padStart(4, '0');
+  return crc.toString(16).toUpperCase().padStart(4, "0");
 }
-function asciiToHex(s) {
-  let out = '';
-  for (let i = 0; i < s.length; i++) out += s.charCodeAt(i).toString(16).padStart(2, '0');
-  return out.toUpperCase();
-}
+const asciiToHex = (s) => Array.from(s, c => c.charCodeAt(0).toString(16).padStart(2, "0")).join("").toUpperCase();
 
-// ======== TLV helpers ========
+// ===== TLV =====
 function parseTLV(s) {
-  const map = new Map();
-  let i = 0;
+  const m = new Map(); let i = 0;
   while (i + 4 <= s.length) {
-    const id = s.substr(i, 2);
-    const len = parseInt(s.substr(i + 2, 2), 10);
-    const start = i + 4;
-    const end = start + len;
-    if (isNaN(len) || end > s.length) break;
-    map.set(id, s.substring(start, end));
-    i = end;
+    const id = s.substr(i, 2); const len = parseInt(s.substr(i + 2, 2), 10);
+    const start = i + 4, end = start + len; if (isNaN(len) || end > s.length) break;
+    m.set(id, s.substring(start, end)); i = end;
   }
-  return map;
+  return m;
 }
-function tlvSerialize(map) {
-  let out = '';
-  for (const [id, val] of map.entries()) {
-    out += id + String(val.length).padStart(2, '0') + val;
-  }
-  return out;
-}
+function tlvSerialize(m) { let out=""; for (const [id,v] of m) out += id + String(v.length).padStart(2,"0") + v; return out; }
 const tlvGet = (m, id) => (m.has(id) ? m.get(id) : null);
-function tlvPut(m, id, val) { m.set(id, String(val ?? '')); }
-function tlvDel(m, id) { m.delete(id); }
+const tlvPut = (m, id, v) => m.set(id, String(v ?? ""));
+const tlvDel = (m, id) => m.delete(id);
 
-// ======== Ref numeric ≤ 16 digit ========
-function nextNumericRef() {
-  const ts = Math.floor(Date.now() / 1000);
-  const rnd = Math.floor(Math.random() * 1000);
-  return String((ts * 1000 + rnd) % 1e16).padStart(10, '0'); // 10–16 digit ok
-}
+// ===== builder (default: keep tag 01 dari base) =====
+function buildQRIS({ base, amount, reference, forceDynamic = false }) {
+  if (!base) throw new Error("BASE_QR_STRING kosong");
+  const amtStr = String(Math.round(Number(amount) || 0));
+  if (!/^\d+$/.test(amtStr) || Number(amtStr) < 1) throw new Error("amount minimal 1");
 
-// ======== Build QRIS dari base static + amount + ref ========
-function buildQRIS({ base, amount, reference }) {
-  if (!base) throw new Error('BASE_QR_STRING kosong');
-
-  // minimal 1000 biar tidak ditolak acquirer
-  const amt = Math.max(1000, Math.round(Number(amount) || 0));
-  const amtStr = String(amt);
-
-  // 1) buang CRC lama
-  let raw = base.trim().replace(/6304[0-9A-Fa-f]{4}$/, '');
-
-  // 2) JANGAN paksa 010212 — biarkan 010211 (static)
-  //    Kalau base sudah 010212 biarkan, tapi jangan ganti.
+  let raw = base.trim().replace(/6304[0-9A-Fa-f]{4}$/, "");
   const tlvs = parseTLV(raw);
-  const poi = tlvGet(tlvs, '01');
-  if (poi !== '11' && poi !== '12') tlvPut(tlvs, '01', '11'); // fallback aman
 
-  // 3) set amount (54)
-  tlvPut(tlvs, '54', amtStr);
+  if (forceDynamic) tlvPut(tlvs, "01", "12"); // kalau tidak, biarkan bawaan base (11/12)
+  tlvPut(tlvs, "54", amtStr);
 
-  // 4) set reference numeric di 62/01
-  const tag62raw = tlvGet(tlvs, '62') || '';
-  const tag62map = parseTLV(tag62raw);
-  tlvPut(tag62map, '01', reference);
-  tlvPut(tlvs, '62', tlvSerialize(tag62map));
+  const tag62 = parseTLV(tlvGet(tlvs, "62") || "");
+  tlvPut(tag62, "01", String(reference).slice(0, 25));
+  tlvPut(tlvs, "62", tlvSerialize(tag62));
 
-  // 5) CRC ulang
-  tlvDel(tlvs, '63');
+  tlvDel(tlvs, "63");
   const noCRC = tlvSerialize(tlvs);
-  const forCRC = noCRC + '6304';
-  const crc = crc16ccitt(asciiToHex(forCRC));
-  return forCRC + crc;
+  const withTag = noCRC + "6304";
+  const crc = crc16ccitt(asciiToHex(withTag));
+  return withTag + crc;
 }
 
-// ======== Helpers response ========
-function ok(res, data) {
-  res.setHeader('Content-Type', 'application/json');
-  res.status(200).json({ success: true, ...data });
-}
-function err(res, code, message) {
-  res.setHeader('Content-Type', 'application/json');
-  res.status(code).json({ success: false, message });
-}
-function applyCORS(res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST,GET,OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization');
+function json(data, status = 200) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: {
+      "content-type": "application/json",
+      "access-control-allow-origin": "*",
+      "access-control-allow-methods": "GET,POST,OPTIONS",
+      "access-control-allow-headers": "content-type",
+    },
+  });
 }
 
-// ======== Handler ========
-export default async function handler(req, res) {
-  applyCORS(res);
-  if (req.method === 'OPTIONS') return res.status(204).end();
+export default async function handler(req) {
+  if (req.method === "OPTIONS") return new Response(null, { status: 204 });
 
-  // GET quick test
-  if (req.method === 'GET') {
-    const amount = Number(req.query.amount || 0) || 1000;
-    try {
-      const reference = nextNumericRef();
-      const qris = buildQRIS({ base: BASE_QR_STRING, amount, reference });
-      const qr_image_url =
-        'https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=' +
-        encodeURIComponent(qris);
-      return ok(res, {
-        store: STORE_NAME || 'LevPay',
-        reference,
-        amount,
-        qris,
-        qr_image_url
-      });
-    } catch (e) {
-      return err(res, 500, e.message || 'internal error');
-    }
+  const url = new URL(req.url);
+
+  // simple debug
+  if (url.pathname.endsWith("/api/qr/debug")) {
+    return json({
+      ok: true,
+      store: STORE_NAME || "LevPay",
+      has_base: Boolean(BASE_QR_STRING),
+      has_auth: Boolean(AUTH_USERNAME && AUTH_TOKEN),
+    });
   }
 
-  if (req.method !== 'POST') return err(res, 405, 'Method not allowed');
+  if (!url.pathname.endsWith("/api/qr/create")) {
+    return json({ success: false, message: "Not found" }, 404);
+  }
 
   try {
-    const { amount } = req.body || {};
-    const amt = Number(amount) || 0;
-    if (amt < 1) return err(res, 400, 'amount minimal 1');
+    let amount = url.searchParams.get("amount");
+    const mode = (url.searchParams.get("mode") || "keep").toLowerCase(); // keep | force12
+    if (req.method === "POST") {
+      const body = await req.json().catch(() => ({}));
+      if (body && body.amount != null) amount = body.amount;
+    }
+    const amt = Number(amount || 0);
+    if (!amt || amt < 1) return json({ success: false, message: "amount minimal 1" }, 400);
+    if (!BASE_QR_STRING) return json({ success: false, message: "BASE_QR_STRING belum diset" }, 400);
 
-    const reference = nextNumericRef();
-    const qris = buildQRIS({ base: BASE_QR_STRING, amount: amt, reference });
-    const qr_image_url =
-      'https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=' +
-      encodeURIComponent(qris);
-
-    return ok(res, {
-      store: STORE_NAME || 'LevPay',
+    const reference = "REF" + Date.now();
+    const qris = buildQRIS({
+      base: BASE_QR_STRING,
+      amount: amt,
       reference,
-      amount: Math.max(1000, Math.round(amt)),
-      qris,
-      qr_image_url
+      forceDynamic: mode === "force12",
     });
+    const qr_image_url = "https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=" + encodeURIComponent(qris);
+
+    return json({ success: true, store: STORE_NAME || "LevPay", reference, amount: amt, qris, qr_image_url });
   } catch (e) {
-    return err(res, 500, e.message || 'internal error');
+    return json({ success: false, message: String(e?.message || e) }, 500);
   }
 }
